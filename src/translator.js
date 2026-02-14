@@ -13,6 +13,8 @@ export async function getBulkTeamTranslations(names, env, ctx) {
 
     // 1. Deduplicate inputs
     const uniqueNames = [...new Set(names.filter(n => n))];
+    uniqueNames.sort(); // Sort to ensure consistent cache keys (e.g. for Supabase URL)
+
     const resultMap = {};
 
     // 2. Batch Fetch from Supabase

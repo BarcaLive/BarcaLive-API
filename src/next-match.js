@@ -4,7 +4,15 @@ import { fetchCached } from './cache-helper.js';
 
 export async function handleNextMatches(iso = 'PL', env, ctx) {
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${now}&limit=15&order[startTime]=asc&iso=${iso}`;
+
+  const params = new URLSearchParams({
+    itemId: CONFIG.ITEM_ID,
+    'startTime[after]': now,
+    limit: '15',
+    'order[startTime]': 'asc',
+    iso: iso || 'PL'
+  });
+  const url = `${CONFIG.MECZYKI_API}/matches?${params.toString()}`;
 
   try {
     const res = await fetchCached(url, { method: "GET" }, 300, ctx); // 5 min cache

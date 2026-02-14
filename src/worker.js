@@ -25,6 +25,13 @@ export default {
       }), { status: 400, headers });
     }
 
+    // 2. Walidacja parametru 'iso' (jeśli podany)
+    if (iso && !/^[a-zA-Z]{2}$/.test(iso)) {
+      return new Response(JSON.stringify({
+        error: "Unavailable 'iso' value. Try again with another."
+      }), { status: 400, headers });
+    }
+
     try {
       let responseData;
 
@@ -33,9 +40,6 @@ export default {
           // Dla 'match' ISO jest obowiązkowe
           if (!iso) {
             return new Response(JSON.stringify({ error: "Missing 'iso' parameter." }), { status: 400, headers });
-          }
-          if (!/^[a-zA-Z]{2}$/.test(iso)) {
-            return new Response(JSON.stringify({ error: "Unavailable 'iso' value. Try again with another." }), { status: 400, headers });
           }
           responseData = await handleMatches(iso, env, ctx);
           break;

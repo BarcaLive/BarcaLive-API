@@ -18,20 +18,47 @@ export async function handleMatches(isoCode, env, ctx) {
   const prevJson = await prevRes.json();
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
-  // 1. Collect names
-  const allNames = new Set();
-  allMatchesRaw.forEach(m => {
-    if (m.homeParticipant?.displayName) allNames.add(m.homeParticipant.displayName);
-    if (m.awayParticipant?.displayName) allNames.add(m.awayParticipant.displayName);
+  // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
+  // 1. Unique IDs
+  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
+  const uniqueMatchesList = [];
+  for (const id of uniqueIds) {
+    const match = allMatchesRaw.find(m => m.id === id);
+    if (match) uniqueMatchesList.push(match);
+  }
+
+  // 2. Classify Statuses (Raw) to find which ones we actually used
+  const isLive = (m) => ['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live';
+  const isFinished = (m) => m.statusGroup === 'finished' || m.status === 'finished';
+  const isScheduled = (m) => !isLive(m) && !isFinished(m);
+
+  // 3. Select relevant matches
+  const liveRaw = uniqueMatchesList.filter(isLive);
+  const scheduledRaw = uniqueMatchesList.filter(isScheduled).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  const finishedRaw = uniqueMatchesList.filter(isFinished).sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).slice(0, 6);
+
+  // LOGIC: One active slot
+  let activeRaw = null;
+  if (liveRaw.length > 0) activeRaw = liveRaw[0];
+  else if (scheduledRaw.length > 0) activeRaw = scheduledRaw[0];
+
+  // 4. Collect Names ONLY from relevant matches
+  const relevantMatches = [...finishedRaw];
+  if (activeRaw) relevantMatches.push(activeRaw);
+
+  const relevantNames = new Set();
+  relevantMatches.forEach(m => {
+    if (m.homeParticipant?.displayName) relevantNames.add(m.homeParticipant.displayName);
+    if (m.awayParticipant?.displayName) relevantNames.add(m.awayParticipant.displayName);
   });
 
-  // 2. Bulk Translate
-  const translationsMap = await getBulkTeamTranslations(Array.from(allNames), env, ctx);
+  // 5. Bulk Translate (Reduced set)
+  const translationsMap = await getBulkTeamTranslations(Array.from(relevantNames), env, ctx);
 
   const mapMatch = (m) => {
     let appStatus = 'SCHEDULED';
-    if (m.statusGroup === 'finished' || m.status === 'finished') appStatus = 'FINISHED';
-    if (['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live') appStatus = 'IN_PLAY';
+    if (isFinished(m)) appStatus = 'FINISHED';
+    if (isLive(m)) appStatus = 'IN_PLAY';
 
     // Obliczanie prawdopodobieństwa z kursów
     const odds = (m.odds && m.odds[0]) ? m.odds[0] : {};
@@ -76,41 +103,16 @@ export async function handleMatches(isoCode, env, ctx) {
     };
   };
 
-  // Usuwanie duplikatów i mapowanie
-  // Najpierw unikalne ID
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  // Potem filtrujemy po ID i mapujemy
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  // 6. Map results
+  const finalLive = [];
+  const finalUpcoming = [];
+
+  if (activeRaw) {
+    if (isLive(activeRaw)) finalLive.push(mapMatch(activeRaw));
+    else finalUpcoming.push(mapMatch(activeRaw));
   }
 
-  const uniqueMatches = uniqueMatchesList.map(m => mapMatch(m));
-
-  // Filtrowanie LIVE i NADCHODZĄCYCH
-  const liveMatches = uniqueMatches.filter(m => m.appStatus === 'IN_PLAY');
-  const upcomingMatches = uniqueMatches
-    .filter(m => m.appStatus === 'SCHEDULED')
-    .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-
-  // LOGIKA: Tylko jeden "aktywny" slot (Live ma pierwszeństwo)
-  let finalLive = [];
-  let finalUpcoming = [];
-
-  if (liveMatches.length > 0) {
-    finalLive = [liveMatches[0]];
-    finalUpcoming = []; // Nie pokazuj następnego, jeśli trwa mecz
-  } else if (upcomingMatches.length > 0) {
-    finalLive = [];
-    finalUpcoming = [upcomingMatches[0]];
-  }
-
-  // ZAKOŃCZONE: 6 meczów, od najnowszego do najstarszego
-  const finished = uniqueMatches
-    .filter(m => m.appStatus === 'FINISHED')
-    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
-    .slice(0, 6);
+  const finished = finishedRaw.map(mapMatch);
 
   // Wybieramy mecz do wzbogacenia o TV/LiveDetails
   const targetMatch = finalLive[0] || finalUpcoming[0] || null;

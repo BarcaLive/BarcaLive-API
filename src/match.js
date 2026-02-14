@@ -125,7 +125,7 @@ export async function handleMatches(isoCode, env, ctx) {
       try {
         // Cache Key for Parsed TV Data
         // We use a fake URL to store the *computed* result in Cloudflare Cache
-        const parsedCacheUrl = `https://api.barcalive.online/internal/tv-parsed/${targetMatch.id}-${isoCode}`;
+        const parsedCacheUrl = `https://api.barcalive.online/internal/tv-parsed/${encodeURIComponent(targetMatch.id)}-${encodeURIComponent(isoCode)}`;
         const cache = caches.default;
         const parsedCacheKey = new Request(parsedCacheUrl);
 
@@ -164,7 +164,7 @@ export async function handleMatches(isoCode, env, ctx) {
 
           if (fmMatches.length > 0) {
             // Fotmob TV Details - 5 min cache
-            const tvRes = await fetchCached(`https://www.fotmob.com/api/data/tvlisting?matchId=${fmMatches[0].id}&countryCode=${isoCode}`, {
+            const tvRes = await fetchCached(`https://www.fotmob.com/api/data/tvlisting?matchId=${encodeURIComponent(fmMatches[0].id)}&countryCode=${encodeURIComponent(isoCode)}`, {
               headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.fotmob.com/" }
             }, 300, ctx);
             const tvJson = await tvRes.json();

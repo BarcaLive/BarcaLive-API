@@ -16,7 +16,7 @@ export async function getBulkTeamTranslations(names, env, ctx) {
     const resultMap = {};
 
     // 2. Batch Fetch from Supabase
-    const chunkSize = 15;
+    const chunkSize = 50; // Use larger chunks to reduce subrequests (Supabase handles larger URLs fine)
     const chunks = [];
     for (let i = 0; i < uniqueNames.length; i += chunkSize) {
         chunks.push(uniqueNames.slice(i, i + chunkSize));
@@ -45,8 +45,8 @@ export async function getBulkTeamTranslations(names, env, ctx) {
 
     // LIMIT SUBREQUESTS!
     // Cloudflare has a limit of 50 subrequests.
-    // Reduced to 2 to ensure we save budget for Fotmob/Meczyki fetches.
-    const MAX_WIKI_FETCHES = 2;
+    // Reduced to 1 to strongly ensure we save budget for Fotmob/Meczyki fetches.
+    const MAX_WIKI_FETCHES = 1;
     const namesToFetch = missingNames.slice(0, MAX_WIKI_FETCHES);
     const namesToSkip = missingNames.slice(MAX_WIKI_FETCHES);
 

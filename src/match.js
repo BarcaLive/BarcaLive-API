@@ -1,0 +1,196 @@
+import { CONFIG } from './config.js';
+import { getBulkTeamTranslations } from './translator.js';
+import { fetchCached } from './cache-helper.js';
+
+export async function handleMatches(isoCode, env, ctx) {
+  const now = new Date();
+  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
+
+  // 1. Pobieramy dane z API
+  // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)
+  // Past (limit=15) -> Medium Cache (5m)
+  const [nextRes, prevRes] = await Promise.all([
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
+  ]);
+
+  const nextJson = await nextRes.json();
+  const prevJson = await prevRes.json();
+  const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
+
+  // 1. Collect names
+  const allNames = new Set();
+  allMatchesRaw.forEach(m => {
+    if (m.homeParticipant?.displayName) allNames.add(m.homeParticipant.displayName);
+    if (m.awayParticipant?.displayName) allNames.add(m.awayParticipant.displayName);
+  });
+
+  // 2. Bulk Translate
+  const translationsMap = await getBulkTeamTranslations(Array.from(allNames), env, ctx);
+
+  const mapMatch = (m) => {
+    let appStatus = 'SCHEDULED';
+    if (m.statusGroup === 'finished' || m.status === 'finished') appStatus = 'FINISHED';
+    if (['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live') appStatus = 'IN_PLAY';
+
+    // Obliczanie prawdopodobieństwa z kursów
+    const odds = (m.odds && m.odds[0]) ? m.odds[0] : {};
+    const h = odds.homeOdds, d = odds.tieOdds, a = odds.awayOdds;
+    let probs = { homeWin: 0, draw: 0, awayWin: 0 };
+    if (h > 1 && d > 1 && a > 1) {
+      const total = (1 / h) + (1 / d) + (1 / a);
+      probs = {
+        homeWin: Math.round(((1 / h) / total) * 100),
+        draw: Math.round(((1 / d) / total) * 100),
+        awayWin: Math.round(((1 / a) / total) * 100)
+      };
+    }
+
+    // Tłumaczenie nazw
+    const homeName = m.homeParticipant?.displayName;
+    const awayName = m.awayParticipant?.displayName;
+
+    const homeTrans = translationsMap[homeName] || { pl: homeName, en: homeName, es: homeName, de: homeName, fr: homeName };
+    const awayTrans = translationsMap[awayName] || { pl: awayName, en: awayName, es: awayName, de: awayName, fr: awayName };
+
+    return {
+      id: m.id,
+      startTime: m.startTime,
+      status: m.status,
+      appStatus: appStatus,
+      competition: { displayName: m.competition?.displayName },
+      odds: (probs.homeWin === 0 && probs.draw === 0) ? null : probs,
+      home: {
+        id: m.homeParticipant?.id,
+        name: homeTrans,
+        crest: `${CONFIG.SUPABASE_URL}/${m.homeParticipant?.id}.webp`
+      },
+      away: {
+        id: m.awayParticipant?.id,
+        name: awayTrans,
+        crest: `${CONFIG.SUPABASE_URL}/${m.awayParticipant?.id}.webp`
+      },
+      score: { home: m.homeScore ?? 0, away: m.awayScore ?? 0 },
+      tv: null,
+      liveDetails: null
+    };
+  };
+
+  // Usuwanie duplikatów i mapowanie
+  // Najpierw unikalne ID
+  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
+  // Potem filtrujemy po ID i mapujemy
+  const uniqueMatchesList = [];
+  for (const id of uniqueIds) {
+    const match = allMatchesRaw.find(m => m.id === id);
+    if (match) uniqueMatchesList.push(match);
+  }
+
+  const uniqueMatches = uniqueMatchesList.map(m => mapMatch(m));
+
+  // Filtrowanie LIVE i NADCHODZĄCYCH
+  const liveMatches = uniqueMatches.filter(m => m.appStatus === 'IN_PLAY');
+  const upcomingMatches = uniqueMatches
+    .filter(m => m.appStatus === 'SCHEDULED')
+    .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+  // LOGIKA: Tylko jeden "aktywny" slot (Live ma pierwszeństwo)
+  let finalLive = [];
+  let finalUpcoming = [];
+
+  if (liveMatches.length > 0) {
+    finalLive = [liveMatches[0]];
+    finalUpcoming = []; // Nie pokazuj następnego, jeśli trwa mecz
+  } else if (upcomingMatches.length > 0) {
+    finalLive = [];
+    finalUpcoming = [upcomingMatches[0]];
+  }
+
+  // ZAKOŃCZONE: 6 meczów, od najnowszego do najstarszego
+  const finished = uniqueMatches
+    .filter(m => m.appStatus === 'FINISHED')
+    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+    .slice(0, 6);
+
+  // Wybieramy mecz do wzbogacenia o TV/LiveDetails
+  const targetMatch = finalLive[0] || finalUpcoming[0] || null;
+
+  if (targetMatch) {
+    const promises = [];
+
+    // 1. Fotmob TV Details (Always run for target match)
+    const fotmobTask = async () => {
+      try {
+        // Pobieranie poprawnego ID z Fotmob do transmisji TV
+        const fotmobTeamUrl = "https://www.fotmob.com/pl/teams/8634/fixtures/barcelona";
+        // Fotmob HTML - 5 min cache
+        const fRes = await fetchCached(fotmobTeamUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36" }
+        }, 300, ctx);
+        const html = await fRes.text();
+        const matchDataStr = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+
+        if (matchDataStr) {
+          const data = JSON.parse(matchDataStr[1]);
+          let fmMatches = [];
+          const searchFM = (obj) => {
+            if (!obj || typeof obj !== 'object') return;
+            if (obj.id && obj.status?.utcTime) {
+              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+            }
+            for (const key in obj) searchFM(obj[key]);
+          };
+          searchFM(data);
+          fmMatches.sort((a, b) => a.time - b.time);
+
+          if (fmMatches.length > 0) {
+            // Fotmob TV Details - 5 min cache
+            const tvRes = await fetchCached(`https://www.fotmob.com/api/data/tvlisting?matchId=${fmMatches[0].id}&countryCode=${isoCode}`, {
+              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.fotmob.com/" }
+            }, 300, ctx);
+            const tvJson = await tvRes.json();
+            if (tvJson?.name) {
+              targetMatch.tv = {
+                stations: tvJson.name.split('/').map(s => s.trim()).filter(s => s !== ""),
+                country: isoCode
+              };
+            } else {
+              targetMatch.tv = { error: "TV JSON has no name", json: tvJson };
+            }
+          } else {
+            targetMatch.tv = { error: "No matches found in Fotmob data", count: fmMatches.length };
+          }
+        } else {
+          targetMatch.tv = { error: "__NEXT_DATA__ not found in HTML", html_preview: html.substring(0, 100) };
+        }
+      } catch (e) {
+        console.error("Fotmob sync error:", e);
+        targetMatch.tv = { error: "Fotmob sync exception", details: e.message, stack: e.stack };
+      }
+    };
+    promises.push(fotmobTask());
+
+    // 2. Jeśli mecz trwa, pobierz dodatkowe detale z Meczyków - Short Cache (15s)
+    if (targetMatch.appStatus === 'IN_PLAY') {
+      const liveDetailsTask = async () => {
+        try {
+          const dRes = await fetchCached(`${CONFIG.MECZYKI_API}/matches/${targetMatch.id}`, { method: "GET" }, 15, ctx);
+          const dJson = await dRes.json();
+          targetMatch.liveDetails = dJson.data || null;
+        } catch (e) { }
+      };
+      promises.push(liveDetailsTask());
+    }
+
+    // Run parallel
+    await Promise.allSettled(promises);
+  }
+
+  return {
+    matches: {
+      live: finalLive,
+      upcoming: finalUpcoming,
+      finished: finished
+    }
+  };
+}

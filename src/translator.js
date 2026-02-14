@@ -30,12 +30,10 @@ export async function getBulkTeamTranslations(names, env, ctx) {
     for (const batch of supabaseResults) {
         if (batch) {
             for (const item of batch) {
-                const isSuspicious = item.pl === item.en && item.pl === item.es && item.pl === item.de && item.pl === item.fr;
-                if (!isSuspicious) {
-                    resultMap[item.pl] = {
-                        pl: item.pl, en: item.en, es: item.es, de: item.de, fr: item.fr
-                    };
-                }
+                // Trust Supabase data if found. Even if all are same, it might be valid.
+                resultMap[item.pl] = {
+                    pl: item.pl, en: item.en, es: item.es, de: item.de, fr: item.fr
+                };
             }
         }
     }
@@ -59,8 +57,12 @@ export async function getBulkTeamTranslations(names, env, ctx) {
 
     // 4. Fetch Missing from Wikidata (Parallel - Limited)
     const wikiPromises = namesToFetch.map(async (name) => {
-        const transl = await fetchFromWikidata(name, ctx);
+        let transl = await fetchFromWikidata(name, ctx);
         if (transl) {
+            // STRICT REQUIREMENT: Use the original requested name as 'pl'
+            // This ensures we don't "translate Polish to Polish" and guarantees cache hits for this name.
+            transl.pl = name;
+
             resultMap[name] = transl;
             // Save to Supabase (Fire and forget - NO CACHE for POST)
             if (env.API_KEY) {

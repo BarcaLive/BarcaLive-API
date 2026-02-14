@@ -45,10 +45,8 @@ export async function getBulkTeamTranslations(names, env, ctx) {
 
     // LIMIT SUBREQUESTS!
     // Cloudflare has a limit of 50 subrequests.
-    // If we have 30 missing teams, we do 30 fetches -> Error.
-    // We only fetch a small batch (e.g., 5) per request.
-    // The rest will get fallback, but will be fetched on next refresh (Lazy Loading).
-    const MAX_WIKI_FETCHES = 5;
+    // Reduced to 2 to ensure we save budget for Fotmob/Meczyki fetches.
+    const MAX_WIKI_FETCHES = 2;
     const namesToFetch = missingNames.slice(0, MAX_WIKI_FETCHES);
     const namesToSkip = missingNames.slice(MAX_WIKI_FETCHES);
 

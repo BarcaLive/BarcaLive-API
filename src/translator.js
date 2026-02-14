@@ -59,8 +59,12 @@ export async function getBulkTeamTranslations(names, env, ctx) {
 
     // 4. Fetch Missing from Wikidata (Parallel - Limited)
     const wikiPromises = namesToFetch.map(async (name) => {
-        const transl = await fetchFromWikidata(name, ctx);
+        let transl = await fetchFromWikidata(name, ctx);
         if (transl) {
+            // STRICT REQUIREMENT: Use the original requested name as 'pl'
+            // This ensures we don't "translate Polish to Polish" and guarantees cache hits for this name.
+            transl.pl = name;
+
             resultMap[name] = transl;
             // Save to Supabase (Fire and forget - NO CACHE for POST)
             if (env.API_KEY) {

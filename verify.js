@@ -2,7 +2,7 @@
 
 async function run() {
     try {
-        const res = await fetch("https://api.barcalive.online/?data=match&iso=PL");
+        const res = await fetch("https://api.barcalive.online/?data=match&iso=PL&_bust=" + Date.now());
         const json = await res.json();
 
         // Find upcoming/live match

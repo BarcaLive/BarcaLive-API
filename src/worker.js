@@ -13,8 +13,7 @@ export default {
 
     const headers = {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'X-Worker-Version': '1.0.1-lab-fix'
+      'Access-Control-Allow-Origin': '*'
     };
 
     const available = "match, next, prev, laliga, ucl";

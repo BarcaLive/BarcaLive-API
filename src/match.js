@@ -121,6 +121,21 @@ export async function handleMatches(isoCode, env, ctx) {
     // 1. Fotmob TV Details (Always run for target match)
     const fotmobTask = async () => {
       try {
+        // Cache Key for Parsed TV Data
+        // We use a fake URL to store the *computed* result in Cloudflare Cache
+        const parsedCacheUrl = `https://api.barcalive.online/internal/tv-parsed/${targetMatch.id}-${isoCode}`;
+        const cache = caches.default;
+        const parsedCacheKey = new Request(parsedCacheUrl);
+
+        // 1. Check if we have valid PARSED data cached
+        let cachedParsedResponse = await cache.match(parsedCacheKey);
+        if (cachedParsedResponse) {
+          const cachedTv = await cachedParsedResponse.json();
+          targetMatch.tv = cachedTv;
+          return; // Done!
+        }
+
+        // 2. If not, proceed with complex fetching & parsing
         // Pobieranie poprawnego ID z Fotmob do transmisji TV
         const fotmobTeamUrl = "https://www.fotmob.com/pl/teams/8634/fixtures/barcelona";
         // Fotmob HTML - 5 min cache
@@ -129,6 +144,8 @@ export async function handleMatches(isoCode, env, ctx) {
         }, 300, ctx);
         const html = await fRes.text();
         const matchDataStr = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+
+        let tvResult = null;
 
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
@@ -150,19 +167,39 @@ export async function handleMatches(isoCode, env, ctx) {
             }, 300, ctx);
             const tvJson = await tvRes.json();
             if (tvJson?.name) {
-              targetMatch.tv = {
+              tvResult = {
                 stations: tvJson.name.split('/').map(s => s.trim()).filter(s => s !== ""),
                 country: isoCode
               };
             } else {
-              targetMatch.tv = { error: "TV JSON has no name", json: tvJson };
+              tvResult = { error: "TV JSON has no name", json: tvJson };
             }
           } else {
-            targetMatch.tv = { error: "No matches found in Fotmob data", count: fmMatches.length };
+            tvResult = { error: "No matches found in Fotmob data", count: fmMatches.length };
           }
         } else {
-          targetMatch.tv = { error: "__NEXT_DATA__ not found in HTML", html_preview: html.substring(0, 100) };
+          tvResult = { error: "__NEXT_DATA__ not found in HTML", html_preview: html.substring(0, 100) };
         }
+
+        targetMatch.tv = tvResult;
+
+        // 3. Cache the PARSED result (if valid)
+        if (tvResult && !tvResult.error) {
+          const responseToCache = new Response(JSON.stringify(tvResult), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'public, max-age=300, s-maxage=300' // 5 min cache for parsed data
+            }
+          });
+
+          if (ctx && ctx.waitUntil) {
+            ctx.waitUntil(cache.put(parsedCacheKey, responseToCache));
+          } else {
+            // Fire and forget or await if critical (writing cache is non-critical for response)
+            cache.put(parsedCacheKey, responseToCache).catch(console.error);
+          }
+        }
+
       } catch (e) {
         console.error("Fotmob sync error:", e);
         targetMatch.tv = { error: "Fotmob sync exception", details: e.message, stack: e.stack };

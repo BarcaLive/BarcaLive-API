@@ -73,3 +73,18 @@ export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = nu
 
     return response;
 }
+
+/**
+ * Returns the current time (UTC) rounded down to the nearest interval.
+ * This ensures that time-dependent URLs remain constant within the interval, maximizing cache hits.
+ * @param {number} intervalSeconds Interval in seconds (default 30)
+ * @returns {string} ISO string (YYYY-MM-DD HH:mm:ss)
+ */
+export function getCacheableNow(intervalSeconds = 30) {
+    const now = new Date();
+    const ms = now.getTime();
+    const intervalMs = intervalSeconds * 1000;
+    const roundedMs = Math.floor(ms / intervalMs) * intervalMs;
+    const roundedDate = new Date(roundedMs);
+    return roundedDate.toISOString().replace('T', ' ').substring(0, 19);
+}

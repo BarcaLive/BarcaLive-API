@@ -73,3 +73,19 @@ export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = nu
 
     return response;
 }
+
+/**
+ * Helper to get a stable ISO-like time string for caching.
+ * Rounds the current time down to the nearest intervalSeconds.
+ * Returns format: "YYYY-MM-DD HH:mm:ss" (UTC)
+ * @param {number} intervalSeconds
+ * @returns {string}
+ */
+export function getCacheableNow(intervalSeconds = 30) {
+    const now = new Date();
+    const ms = now.getTime();
+    const intervalMs = intervalSeconds * 1000;
+    const roundedMs = Math.floor(ms / intervalMs) * intervalMs;
+    const roundedDate = new Date(roundedMs);
+    return roundedDate.toISOString().replace('T', ' ').substring(0, 19);
+}

@@ -1,10 +1,11 @@
 import { CONFIG } from './config.js';
 import { getBulkTeamTranslations } from './translator.js';
-import { fetchCached } from './cache-helper.js';
+import { fetchCached, getCacheableNow } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
-  const now = new Date();
-  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
+  // Use a stable timestamp rounded to 30s to maximize cache hits
+  // This ensures that for 30s, the URL remains the same.
+  const nowString = getCacheableNow(30);
 
   // 1. Pobieramy dane z API
   // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)

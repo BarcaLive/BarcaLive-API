@@ -73,3 +73,17 @@ export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = nu
 
     return response;
 }
+
+/**
+ * Returns a rounded ISO string (without 'T', substring(0, 19)) for stable caching keys.
+ * Rounds down to the nearest multiple of ttlSeconds.
+ *
+ * @param {number} ttlSeconds Interval to round to (e.g. 30, 300)
+ * @returns {string} formatted date string
+ */
+export function getCacheableNow(ttlSeconds) {
+    const ms = ttlSeconds * 1000;
+    const now = Date.now();
+    const rounded = new Date(Math.floor(now / ms) * ms);
+    return rounded.toISOString().replace('T', ' ').substring(0, 19);
+}

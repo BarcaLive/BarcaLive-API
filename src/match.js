@@ -1,6 +1,7 @@
 import { CONFIG } from './config.js';
 import { getBulkTeamTranslations } from './translator.js';
 import { fetchCached } from './cache-helper.js';
+import { getTvDetails, getLiveDetails } from './match-details.js';
 
 export async function handleMatches(isoCode, env, ctx) {
   const now = new Date();
@@ -52,8 +53,30 @@ export async function handleMatches(isoCode, env, ctx) {
     if (m.awayParticipant?.displayName) relevantNames.add(m.awayParticipant.displayName);
   });
 
-  // 5. Bulk Translate (Reduced set)
-  const translationsMap = await getBulkTeamTranslations(Array.from(relevantNames), env, ctx);
+  // 5. PARALLEL FETCHING: Translations + Details
+  // We start fetching details for the active match immediately, parallel to translations.
+
+  const translationsPromise = getBulkTeamTranslations(Array.from(relevantNames), env, ctx);
+
+  let tvPromise = Promise.resolve(null);
+  let liveDetailsPromise = Promise.resolve(null);
+
+  if (activeRaw) {
+    // Always fetch TV for active match
+    tvPromise = getTvDetails(activeRaw.id, isoCode, ctx);
+
+    // If match is live, fetch extra details
+    if (isLive(activeRaw)) {
+      liveDetailsPromise = getLiveDetails(activeRaw.id, ctx);
+    }
+  }
+
+  // Await all parallel tasks
+  const [translationsMap, tvResult, liveDetails] = await Promise.all([
+    translationsPromise,
+    tvPromise,
+    liveDetailsPromise
+  ]);
 
   const mapMatch = (m) => {
     let appStatus = 'SCHEDULED';
@@ -114,115 +137,16 @@ export async function handleMatches(isoCode, env, ctx) {
 
   const finished = finishedRaw.map(mapMatch);
 
-  // Wybieramy mecz do wzbogacenia o TV/LiveDetails
+  // Attach details to the target match (if exists)
   const targetMatch = finalLive[0] || finalUpcoming[0] || null;
 
   if (targetMatch) {
-    const promises = [];
-
-    // 1. Fotmob TV Details (Always run for target match)
-    const fotmobTask = async () => {
-      try {
-        // Cache Key for Parsed TV Data
-        // We use a fake URL to store the *computed* result in Cloudflare Cache
-        const parsedCacheUrl = `https://api.barcalive.online/internal/tv-parsed/${targetMatch.id}-${isoCode}`;
-        const cache = caches.default;
-        const parsedCacheKey = new Request(parsedCacheUrl);
-
-        // 1. Check if we have valid PARSED data cached
-        let cachedParsedResponse = await cache.match(parsedCacheKey);
-        if (cachedParsedResponse) {
-          const cachedTv = await cachedParsedResponse.json();
-          targetMatch.tv = cachedTv;
-          return; // Done!
-        }
-
-        // 2. If not, proceed with complex fetching & parsing
-        // Pobieranie poprawnego ID z Fotmob do transmisji TV
-        const fotmobTeamUrl = "https://www.fotmob.com/pl/teams/8634/fixtures/barcelona";
-        // Fotmob HTML - 5 min cache
-        const fRes = await fetchCached(fotmobTeamUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36" }
-        }, 300, ctx);
-        const html = await fRes.text();
-        const matchDataStr = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
-
-        let tvResult = null;
-
-        if (matchDataStr) {
-          const data = JSON.parse(matchDataStr[1]);
-          let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
-            }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
-          fmMatches.sort((a, b) => a.time - b.time);
-
-          if (fmMatches.length > 0) {
-            // Fotmob TV Details - 5 min cache
-            const tvRes = await fetchCached(`https://www.fotmob.com/api/data/tvlisting?matchId=${fmMatches[0].id}&countryCode=${isoCode}`, {
-              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.fotmob.com/" }
-            }, 300, ctx);
-            const tvJson = await tvRes.json();
-            if (tvJson?.name) {
-              tvResult = {
-                stations: tvJson.name.split('/').map(s => s.trim()).filter(s => s !== ""),
-                country: isoCode
-              };
-            } else {
-              tvResult = { error: "TV JSON has no name", json: tvJson };
-            }
-          } else {
-            tvResult = { error: "No matches found in Fotmob data", count: fmMatches.length };
-          }
-        } else {
-          tvResult = { error: "__NEXT_DATA__ not found in HTML", html_preview: html.substring(0, 100) };
-        }
-
-        targetMatch.tv = tvResult;
-
-        // 3. Cache the PARSED result (if valid)
-        if (tvResult && !tvResult.error) {
-          const responseToCache = new Response(JSON.stringify(tvResult), {
-            headers: {
-              'Content-Type': 'application/json',
-              'Cache-Control': 'public, max-age=300, s-maxage=300' // 5 min cache for parsed data
-            }
-          });
-
-          if (ctx && ctx.waitUntil) {
-            ctx.waitUntil(cache.put(parsedCacheKey, responseToCache));
-          } else {
-            // Fire and forget or await if critical (writing cache is non-critical for response)
-            cache.put(parsedCacheKey, responseToCache).catch(console.error);
-          }
-        }
-
-      } catch (e) {
-        console.error("Fotmob sync error:", e);
-        targetMatch.tv = { error: "Fotmob sync exception", details: e.message, stack: e.stack };
-      }
-    };
-    promises.push(fotmobTask());
-
-    // 2. Jeśli mecz trwa, pobierz dodatkowe detale z Meczyków - Short Cache (15s)
-    if (targetMatch.appStatus === 'IN_PLAY') {
-      const liveDetailsTask = async () => {
-        try {
-          const dRes = await fetchCached(`${CONFIG.MECZYKI_API}/matches/${targetMatch.id}`, { method: "GET" }, 15, ctx);
-          const dJson = await dRes.json();
-          targetMatch.liveDetails = dJson.data || null;
-        } catch (e) { }
-      };
-      promises.push(liveDetailsTask());
+    if (tvResult) {
+      targetMatch.tv = tvResult;
     }
-
-    // Run parallel
-    await Promise.allSettled(promises);
+    if (liveDetails) {
+      targetMatch.liveDetails = liveDetails;
+    }
   }
 
   return {

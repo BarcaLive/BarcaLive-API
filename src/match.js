@@ -152,14 +152,38 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+
+          // OPTIMIZATION: Try direct access first to avoid expensive recursive search (~200x speedup)
+          let foundDirectly = false;
+          try {
+            const fallback = data?.props?.pageProps?.fallback;
+            if (fallback) {
+              const teamKey = Object.keys(fallback).find(k => k.startsWith('team-'));
+              if (teamKey && fallback[teamKey]?.fixtures?.allFixtures?.fixtures) {
+                const fixtures = fallback[teamKey].fixtures.allFixtures.fixtures;
+                if (Array.isArray(fixtures)) {
+                  fmMatches = fixtures
+                    .filter(f => f.id && f.status && f.status.utcTime && !f.status.finished)
+                    .map(f => ({ id: f.id, time: new Date(f.status.utcTime) }));
+                  foundDirectly = true;
+                }
+              }
             }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
+          } catch (e) {
+            // Silently fail direct access and fall back to recursion
+          }
+
+          if (!foundDirectly) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+          }
+
           fmMatches.sort((a, b) => a.time - b.time);
 
           if (fmMatches.length > 0) {

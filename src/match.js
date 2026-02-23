@@ -152,14 +152,59 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+
+          // OPTIMIZATION: Try direct access first (O(1)) instead of recursive search (O(N))
+          // Path: props.pageProps.fallback['team-8634'].overview.overviewFixtures
+          try {
+            const fallback = data?.props?.pageProps?.fallback;
+            if (fallback) {
+              // The key is usually team-8634
+              const teamKey = Object.keys(fallback).find(k => k.startsWith('team-'));
+              if (teamKey) {
+                const teamData = fallback[teamKey];
+
+                const processMatches = (list) => {
+                  if (Array.isArray(list)) {
+                    list.forEach(m => {
+                      if (m.id && m.status?.utcTime && !m.status.finished) {
+                        fmMatches.push({ id: m.id, time: new Date(m.status.utcTime) });
+                      }
+                    });
+                  }
+                };
+
+                if (teamData?.overview?.overviewFixtures) processMatches(teamData.overview.overviewFixtures);
+                if (teamData?.fixtures?.allFixtures?.fixtures) processMatches(teamData.fixtures.allFixtures.fixtures);
+                if (teamData?.overview?.nextMatch) processMatches([teamData.overview.nextMatch]);
+              }
             }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
+          } catch (e) {
+            console.error("Fotmob direct parsing failed:", e);
+          }
+
+          // Fallback to recursive search if direct access failed or found nothing
+          if (fmMatches.length === 0) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+          }
+
+          // Deduplicate matches (O(N))
+          const uniqueMatches = [];
+          const seenIds = new Set();
+          for (const m of fmMatches) {
+            if (!seenIds.has(m.id)) {
+              seenIds.add(m.id);
+              uniqueMatches.push(m);
+            }
+          }
+          fmMatches = uniqueMatches;
+
           fmMatches.sort((a, b) => a.time - b.time);
 
           if (fmMatches.length > 0) {

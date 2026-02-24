@@ -19,12 +19,14 @@ export async function handleMatches(isoCode, env, ctx) {
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
+  // 1. Unique IDs (O(N) single pass)
   const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  const seenIds = new Set();
+  for (const m of allMatchesRaw) {
+    if (!seenIds.has(m.id)) {
+      seenIds.add(m.id);
+      uniqueMatchesList.push(m);
+    }
   }
 
   // 2. Classify Statuses (Raw) to find which ones we actually used
@@ -152,15 +154,49 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+
+          // OPTIMIZATION: Try direct access first (O(1))
+          try {
+            const fallback = data?.props?.pageProps?.fallback;
+            if (fallback) {
+              const teamKey = Object.keys(fallback).find(k => k.startsWith('team-'));
+              if (teamKey) {
+                const teamData = fallback[teamKey];
+                // Check nextMatch first
+                if (teamData?.overview?.nextMatch) {
+                  const nm = teamData.overview.nextMatch;
+                  if (nm.id && nm.status?.utcTime && !nm.status.finished) {
+                    fmMatches.push({ id: nm.id, time: new Date(nm.status.utcTime) });
+                  }
+                }
+                // If no nextMatch, check overviewFixtures (sorted list)
+                if (fmMatches.length === 0 && teamData?.overview?.overviewFixtures) {
+                  const fixtures = teamData.overview.overviewFixtures;
+                  for (const f of fixtures) {
+                    if (f.id && f.status?.utcTime && !f.status.finished) {
+                      fmMatches.push({ id: f.id, time: new Date(f.status.utcTime) });
+                      break; // Found the first upcoming match
+                    }
+                  }
+                }
+              }
             }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
-          fmMatches.sort((a, b) => a.time - b.time);
+          } catch (e) {
+            // Ignore errors in optimized path
+          }
+
+          // Fallback to recursive search (O(N)) if direct access failed
+          if (fmMatches.length === 0) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+            fmMatches.sort((a, b) => a.time - b.time);
+          }
 
           if (fmMatches.length > 0) {
             // Fotmob TV Details - 5 min cache

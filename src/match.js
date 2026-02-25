@@ -152,19 +152,55 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
-            }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
-          fmMatches.sort((a, b) => a.time - b.time);
 
-          if (fmMatches.length > 0) {
+          // OPTIMIZATION: Fast path to avoid O(N) recursive search
+          // We look directly into props.pageProps.fallback which usually contains the match data
+          const fallback = data?.props?.pageProps?.fallback;
+
+          if (fallback) {
+            for (const key in fallback) {
+              const val = fallback[key];
+              // Check for fixtures array
+              if (val?.fixtures?.allFixtures?.fixtures) {
+                val.fixtures.allFixtures.fixtures.forEach(obj => {
+                  if (obj.id && obj.status?.utcTime && !obj.status.finished) {
+                    fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+                  }
+                });
+              }
+              // Check for nextMatch object
+              if (val?.fixtures?.allFixtures?.nextMatch) {
+                const obj = val.fixtures.allFixtures.nextMatch;
+                if (obj.id && obj.status?.utcTime && !obj.status.finished) {
+                  fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+                }
+              }
+            }
+          }
+
+          // Fallback to recursive search only if fast path failed
+          if (fmMatches.length === 0) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+          }
+
+          // Find the earliest match (O(N) instead of Sort O(N log N))
+          let earliestMatch = null;
+          for (const m of fmMatches) {
+            if (!earliestMatch || m.time < earliestMatch.time) {
+              earliestMatch = m;
+            }
+          }
+
+          if (earliestMatch) {
             // Fotmob TV Details - 5 min cache
-            const tvRes = await fetchCached(`https://www.fotmob.com/api/data/tvlisting?matchId=${fmMatches[0].id}&countryCode=${isoCode}`, {
+            const tvRes = await fetchCached(`https://www.fotmob.com/api/data/tvlisting?matchId=${earliestMatch.id}&countryCode=${isoCode}`, {
               headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.fotmob.com/" }
             }, 300, ctx);
             const tvJson = await tvRes.json();

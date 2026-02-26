@@ -152,14 +152,33 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+
+          // OPTIMIZATION: Try direct access first (O(1)) to avoid expensive recursive search
+          // Usually matches are in props.pageProps.fallback["team-8634"].fixtures.allFixtures.fixtures
+          const directMatches = data?.props?.pageProps?.fallback?.['team-8634']?.fixtures?.allFixtures?.fixtures;
+          let foundDirectly = false;
+
+          if (Array.isArray(directMatches)) {
+            foundDirectly = true;
+            for (const m of directMatches) {
+              if (m.id && m.status?.utcTime && !m.status.finished) {
+                fmMatches.push({ id: m.id, time: new Date(m.status.utcTime) });
+              }
             }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
+          }
+
+          // Fallback to recursive search (O(N)) if structure changed or direct access failed
+          if (!foundDirectly) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+          }
+
           fmMatches.sort((a, b) => a.time - b.time);
 
           if (fmMatches.length > 0) {

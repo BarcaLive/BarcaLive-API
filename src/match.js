@@ -152,14 +152,37 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+
+          // OPTIMIZATION: Try Direct Access First (O(1))
+          try {
+            // Path: props.pageProps.fallback['team-8634'].fixtures.allFixtures.fixtures
+            if (data.props?.pageProps?.fallback) {
+              const teamKey = Object.keys(data.props.pageProps.fallback).find(k => k.startsWith('team-'));
+              if (teamKey && data.props.pageProps.fallback[teamKey]?.fixtures?.allFixtures?.fixtures) {
+                const fixtures = data.props.pageProps.fallback[teamKey].fixtures.allFixtures.fixtures;
+                if (Array.isArray(fixtures)) {
+                  fmMatches = fixtures
+                    .filter(f => !f.status.finished)
+                    .map(f => ({ id: f.id, time: new Date(f.status.utcTime) }));
+                }
+              }
             }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
+          } catch (e) {
+            // Ignore optimization error
+          }
+
+          // Fallback: Recursive Search (O(N)) if direct access failed
+          if (fmMatches.length === 0) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+          }
+
           fmMatches.sort((a, b) => a.time - b.time);
 
           if (fmMatches.length > 0) {

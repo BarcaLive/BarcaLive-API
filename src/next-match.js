@@ -1,9 +1,9 @@
 import { CONFIG } from './config.js';
 import { getBulkTeamTranslations } from './translator.js';
-import { fetchCached } from './cache-helper.js';
+import { fetchCached, getCacheableNow } from './cache-helper.js';
 
 export async function handleNextMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const now = getCacheableNow(300);
   const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${now}&limit=15&order[startTime]=asc&iso=${iso}`;
 
   try {

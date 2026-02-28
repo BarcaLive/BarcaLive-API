@@ -73,3 +73,18 @@ export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = nu
 
     return response;
 }
+
+/**
+ * Generates a stable timestamp string rounded down to the nearest interval.
+ * This ensures that cache keys generated with this timestamp remain stable
+ * for the duration of the cache TTL, preventing unnecessary cache misses.
+ *
+ * @param {number} intervalSeconds The interval to round down to (e.g., 30, 300)
+ * @returns {string} The rounded timestamp string (e.g., '2024-05-20 19:00:00')
+ */
+export function getCacheableNow(intervalSeconds) {
+    const now = new Date();
+    const intervalMs = intervalSeconds * 1000;
+    const roundedMs = Math.floor(now.getTime() / intervalMs) * intervalMs;
+    return new Date(roundedMs).toISOString().replace('T', ' ').substring(0, 19);
+}

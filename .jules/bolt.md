@@ -1,0 +1,3 @@
+## 2024-05-20 - [Fixing Cache TTL Negation from Dynamic URL Parameters]
+**Learning:** Using `new Date().toISOString()` directly in a query string (e.g., `startTime[after]=2024-05-20 19:00:01`) creates a unique URL every second. Since Cloudflare's Cache API (`caches.default`) uses the exact URL as the cache key, this completely negates the intended TTL (e.g., 30s or 5m) because the cache key changes before the TTL expires, leading to near 100% cache misses.
+**Action:** Always round timestamps used in caching URLs to match or align with the intended cache TTL (e.g., round to the nearest 30 seconds for a 30s TTL, or 5 minutes for a 5m TTL).

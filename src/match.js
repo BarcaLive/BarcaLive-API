@@ -4,6 +4,12 @@ import { fetchCached } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
   const now = new Date();
+
+  // OPTIMIZATION: Round timestamp down to nearest 30s to stabilize cache keys.
+  // This aligns with our shortest cache TTL (30s) for live/upcoming matches.
+  now.setMilliseconds(0);
+  now.setSeconds(Math.floor(now.getSeconds() / 30) * 30);
+
   const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
 
   // 1. Pobieramy dane z API

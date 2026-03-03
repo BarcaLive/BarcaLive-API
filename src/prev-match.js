@@ -3,8 +3,9 @@ import { getBulkTeamTranslations } from './translator.js';
 import { fetchCached } from './cache-helper.js';
 
 export async function handlePrevMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${now}&limit=15&order[startTime]=desc&iso=${iso}`;
+  const now = new Date();
+  const nowString300 = new Date(Math.floor(now.getTime() / 300000) * 300000).toISOString().replace('T', ' ').substring(0, 19);
+  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString300}&limit=15&order[startTime]=desc&iso=${iso}`;
 
   try {
     const res = await fetchCached(url, { method: "GET" }, 300, ctx); // 5 min cache

@@ -1,0 +1,3 @@
+## 2025-10-14 - Stable Cache Keys & O(N) Arrays
+**Learning:** When using external caching solutions (like Cloudflare fetch caching via caches.default), cache keys using dynamically generated timestamps with second precision completely defeat caching mechanisms. Rounding down these dynamic boundaries to the respective TTL sizes ensures deterministic, constant cache keys that actually fulfill the intent. Additionally, `Array.find` inside nested arrays has O(N^2) complexity, mapping objects once with `Map` before iterating lowers computational overhead to O(N).
+**Action:** Use `new Date(Math.floor(Date.now() / TTL_MS) * TTL_MS)` whenever specifying relative dynamic times for cache parameters and replace `.find` within loops with a single-pass `Map` lookup.

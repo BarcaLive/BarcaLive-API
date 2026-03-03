@@ -4,14 +4,18 @@ import { fetchCached } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
   const now = new Date();
-  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
+
+  // OPTIMIZATION: Round timestamps down to nearest cache TTL boundary
+  // to ensure cache keys remain stable and we actually hit the cache.
+  const nowString30 = new Date(Math.floor(now.getTime() / 30000) * 30000).toISOString().replace('T', ' ').substring(0, 19);
+  const nowString300 = new Date(Math.floor(now.getTime() / 300000) * 300000).toISOString().replace('T', ' ').substring(0, 19);
 
   // 1. Pobieramy dane z API
   // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)
   // Past (limit=15) -> Medium Cache (5m)
   const [nextRes, prevRes] = await Promise.all([
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString30}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString300}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
   ]);
 
   const nextJson = await nextRes.json();
@@ -19,13 +23,14 @@ export async function handleMatches(isoCode, env, ctx) {
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  // 1. Unique IDs - O(N) single-pass deduplication
+  const uniqueMatchesMap = new Map();
+  for (const match of allMatchesRaw) {
+    if (!uniqueMatchesMap.has(match.id)) {
+      uniqueMatchesMap.set(match.id, match);
+    }
   }
+  const uniqueMatchesList = Array.from(uniqueMatchesMap.values());
 
   // 2. Classify Statuses (Raw) to find which ones we actually used
   const isLive = (m) => ['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live';

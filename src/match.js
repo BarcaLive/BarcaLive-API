@@ -4,14 +4,21 @@ import { fetchCached } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
   const now = new Date();
-  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
+
+  // OPTIMIZATION: Round timestamps to match cache TTLs.
+  // Using exact second precision ruins cache hit rates because the URL changes every second.
+  // By rounding down to the nearest 30s or 5m, we ensure the URL stays constant for the duration of the cache.
+  const roundToNearest = (date, seconds) => new Date(Math.floor(date.getTime() / (seconds * 1000)) * (seconds * 1000));
+
+  const now30s = roundToNearest(now, 30).toISOString().replace('T', ' ').substring(0, 19);
+  const now5m = roundToNearest(now, 300).toISOString().replace('T', ' ').substring(0, 19);
 
   // 1. Pobieramy dane z API
   // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)
   // Past (limit=15) -> Medium Cache (5m)
   const [nextRes, prevRes] = await Promise.all([
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${now30s}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${now5m}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
   ]);
 
   const nextJson = await nextRes.json();

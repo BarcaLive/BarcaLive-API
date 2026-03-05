@@ -1,0 +1,3 @@
+## 2024-05-20 - [Cache Invalidation by Precision Timestamps]
+**Learning:** Cloudflare Cache API uses exact URLs as keys. Including second-level precise timestamps (`new Date().toISOString()`) in query strings causes the URL to change every second, resulting in ~100% cache misses, completely negating any performance benefits of the caching layer.
+**Action:** When querying APIs with time-based filters through a caching proxy, always round the timestamp down to the nearest cache TTL interval (e.g., 30s or 5m). This ensures the generated URL remains constant for the life of the cache, allowing `caches.default.match()` to succeed.

@@ -3,8 +3,14 @@ import { getBulkTeamTranslations } from './translator.js';
 import { fetchCached } from './cache-helper.js';
 
 export async function handlePrevMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${now}&limit=15&order[startTime]=desc&iso=${iso}`;
+  const now = new Date();
+
+  // OPTIMIZATION: Round timestamp down to nearest 5m to align with 300s cache TTL.
+  // This ensures the URL doesn't change every second, drastically improving cache hit rates.
+  const roundToNearest = (date, seconds) => new Date(Math.floor(date.getTime() / (seconds * 1000)) * (seconds * 1000));
+  const now5m = roundToNearest(now, 300).toISOString().replace('T', ' ').substring(0, 19);
+
+  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${now5m}&limit=15&order[startTime]=desc&iso=${iso}`;
 
   try {
     const res = await fetchCached(url, { method: "GET" }, 300, ctx); // 5 min cache

@@ -1,0 +1,3 @@
+## 2026-03-06 - Fixing Cache Hit Rate with Timestamps
+**Learning:** Using a continuously changing dynamic query parameter like `new Date().toISOString()` completely busts any cache layer (like `fetchCached` / Cloudflare `caches.default`) since the URL acts as the cache key and changes every second.
+**Action:** When appending a timestamp to a cached API request (e.g., `startTime[before]`), round it down mathematically (e.g. `Math.floor(Date.now() / TTL) * TTL`) to match the desired TTL interval. This stabilizes the cache key for the duration of the cache, allowing cache hits while still requesting appropriately relevant data.

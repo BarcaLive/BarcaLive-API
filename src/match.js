@@ -4,14 +4,19 @@ import { fetchCached } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
   const now = new Date();
-  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
+
+  // OPTIMIZATION: Round timestamps down to match cache TTLs (30s and 5m).
+  // Without this, the URL changes every second, completely busting the cache for external API calls.
+  const tsNow = now.getTime();
+  const nowString30s = new Date(Math.floor(tsNow / 30000) * 30000).toISOString().replace('T', ' ').substring(0, 19);
+  const nowString5m = new Date(Math.floor(tsNow / 300000) * 300000).toISOString().replace('T', ' ').substring(0, 19);
 
   // 1. Pobieramy dane z API
   // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)
   // Past (limit=15) -> Medium Cache (5m)
   const [nextRes, prevRes] = await Promise.all([
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString30s}&limit=5&order[startTime]=asc`, { method: "GET" }, 30, ctx),
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString5m}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
   ]);
 
   const nextJson = await nextRes.json();

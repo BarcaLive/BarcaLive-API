@@ -19,23 +19,33 @@ export async function handleMatches(isoCode, env, ctx) {
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  // 1. Unique IDs (O(N) Map-based deduplication)
+  const uniqueMatchesMap = new Map();
+  for (const match of allMatchesRaw) {
+    if (!uniqueMatchesMap.has(match.id)) {
+      uniqueMatchesMap.set(match.id, match);
+    }
   }
+  const uniqueMatchesList = Array.from(uniqueMatchesMap.values());
 
   // 2. Classify Statuses (Raw) to find which ones we actually used
   const isLive = (m) => ['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live';
   const isFinished = (m) => m.statusGroup === 'finished' || m.status === 'finished';
   const isScheduled = (m) => !isLive(m) && !isFinished(m);
 
-  // 3. Select relevant matches
-  const liveRaw = uniqueMatchesList.filter(isLive);
-  const scheduledRaw = uniqueMatchesList.filter(isScheduled).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-  const finishedRaw = uniqueMatchesList.filter(isFinished).sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).slice(0, 6);
+  // 3. Select relevant matches (Single pass classification)
+  const liveRaw = [];
+  const scheduledRaw = [];
+  const finishedRaw = [];
+
+  for (const m of uniqueMatchesList) {
+    if (isLive(m)) liveRaw.push(m);
+    else if (isFinished(m)) finishedRaw.push(m);
+    else scheduledRaw.push(m);
+  }
+
+  scheduledRaw.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  finishedRaw.sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).splice(6); // Keep only up to 6 finished matches
 
   // LOGIC: One active slot
   let activeRaw = null;
@@ -152,14 +162,35 @@ export async function handleMatches(isoCode, env, ctx) {
         if (matchDataStr) {
           const data = JSON.parse(matchDataStr[1]);
           let fmMatches = [];
-          const searchFM = (obj) => {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.id && obj.status?.utcTime) {
-              if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+
+          // O(1) Direct Access path (Optimization)
+          try {
+            const fallbackObj = data?.props?.pageProps?.fallback || {};
+            const teamKey = Object.keys(fallbackObj).find(k => k.startsWith('team-'));
+            const teamFixtures = teamKey ? fallbackObj[teamKey]?.fixtures?.allFixtures?.fixtures : null;
+            if (Array.isArray(teamFixtures) && teamFixtures.length > 0) {
+              teamFixtures.forEach(obj => {
+                if (obj.id && obj.status?.utcTime && !obj.status.finished) {
+                  fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+                }
+              });
             }
-            for (const key in obj) searchFM(obj[key]);
-          };
-          searchFM(data);
+          } catch (e) {
+            // Silently fallback
+          }
+
+          // Fallback to O(N) recursive search if direct access fails or yields nothing
+          if (fmMatches.length === 0) {
+            const searchFM = (obj) => {
+              if (!obj || typeof obj !== 'object') return;
+              if (obj.id && obj.status?.utcTime) {
+                if (!obj.status.finished) fmMatches.push({ id: obj.id, time: new Date(obj.status.utcTime) });
+              }
+              for (const key in obj) searchFM(obj[key]);
+            };
+            searchFM(data);
+          }
+
           fmMatches.sort((a, b) => a.time - b.time);
 
           if (fmMatches.length > 0) {

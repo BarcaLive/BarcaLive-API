@@ -68,7 +68,7 @@ export default {
 
       // Add Browser Cache Control
       // Short cache for client (e.g. 60s) to feel "instant" on navigation back/forward
-      headers['Cache-Control'] = 'public, max-age=60, s-maxage=60';
+      headers['Cache-Control'] = 'public, max-age=120, s-maxage=120';
 
       return new Response(JSON.stringify(responseData), { headers });
 

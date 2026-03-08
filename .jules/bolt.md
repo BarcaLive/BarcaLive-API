@@ -1,0 +1,3 @@
+## 2024-05-24 - [Optimizing Match Arrays Operations]
+**Learning:** Found two common patterns of unoptimized array usage: `Array.find()` inside a loop for deduplicating, causing O(N²) scaling on larger payloads, and chained `.filter()` operations requiring multiple passes over the array to classify data.
+**Action:** Deduplication was refactored to use a single-pass `Map` lookup ensuring O(N) deduplication time. Match classification was combined into a single `for...of` iteration, replacing three multiple `.filter()` calls, yielding ~3x array processing performance speedup. This pattern should be applied globally to list iterations.

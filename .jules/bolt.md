@@ -1,0 +1,3 @@
+## 2024-06-25 - Replace O(N²) deduplication with O(N) Map and Combine filter loops
+**Learning:** Found an O(N²) anti-pattern in `src/match.js` for match deduplication that used `Array.from(new Set(...))` coupled with a `find()` lookup over the original array inside a loop. This degrades performance severely on large datasets. Additionally, iterating over the array three times using `.filter()` to classify matches is inefficient.
+**Action:** Replace `Set` + `find()` combinations with a single-pass `Map` implementation where elements are added by ID if not already present. Combine multiple array traversal filtering tasks into a single `for...of` loop to save iterations and dramatically improve sorting/filtering performance.

@@ -19,23 +19,37 @@ export async function handleMatches(isoCode, env, ctx) {
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  // 1. Unique IDs (Optimized O(N) Map deduplication)
+  const map = new Map();
+  for (const match of allMatchesRaw) {
+    if (!map.has(match.id)) {
+      map.set(match.id, match);
+    }
   }
+  const uniqueMatchesList = Array.from(map.values());
 
   // 2. Classify Statuses (Raw) to find which ones we actually used
   const isLive = (m) => ['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live';
   const isFinished = (m) => m.statusGroup === 'finished' || m.status === 'finished';
   const isScheduled = (m) => !isLive(m) && !isFinished(m);
 
-  // 3. Select relevant matches
-  const liveRaw = uniqueMatchesList.filter(isLive);
-  const scheduledRaw = uniqueMatchesList.filter(isScheduled).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-  const finishedRaw = uniqueMatchesList.filter(isFinished).sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).slice(0, 6);
+  // 3. Select relevant matches (Optimized single-pass classification)
+  const liveRaw = [];
+  const scheduledRaw = [];
+  const finishedRawFull = [];
+
+  for (const m of uniqueMatchesList) {
+    if (isLive(m)) {
+      liveRaw.push(m);
+    } else if (isFinished(m)) {
+      finishedRawFull.push(m);
+    } else {
+      scheduledRaw.push(m);
+    }
+  }
+
+  scheduledRaw.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  const finishedRaw = finishedRawFull.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()).slice(0, 6);
 
   // LOGIC: One active slot
   let activeRaw = null;

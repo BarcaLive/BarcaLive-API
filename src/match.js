@@ -18,13 +18,13 @@ export async function handleMatches(isoCode, env, ctx) {
   const prevJson = await prevRes.json();
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
-  // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  // ⚡ Bolt Optimization: Filter matches BEFORE translation to reduce subrequests
+  // 1. Deduplicate matches: O(N) Hash Map approach instead of O(N^2) Array.find
+  const uniqueMatchesMap = new Map();
+  for (const match of allMatchesRaw) {
+    if (!uniqueMatchesMap.has(match.id)) {
+      uniqueMatchesMap.set(match.id, match);
+    }
   }
 
   // 2. Classify Statuses (Raw) to find which ones we actually used
@@ -32,10 +32,26 @@ export async function handleMatches(isoCode, env, ctx) {
   const isFinished = (m) => m.statusGroup === 'finished' || m.status === 'finished';
   const isScheduled = (m) => !isLive(m) && !isFinished(m);
 
-  // 3. Select relevant matches
-  const liveRaw = uniqueMatchesList.filter(isLive);
-  const scheduledRaw = uniqueMatchesList.filter(isScheduled).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-  const finishedRaw = uniqueMatchesList.filter(isFinished).sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).slice(0, 6);
+  // 3. Select relevant matches: Single O(N) pass instead of 3x Array.filter
+  const liveRaw = [];
+  const scheduledRaw = [];
+  const finishedRaw = [];
+
+  for (const match of uniqueMatchesMap.values()) {
+    if (isLive(match)) {
+      liveRaw.push(match);
+    } else if (isFinished(match)) {
+      finishedRaw.push(match);
+    } else if (isScheduled(match)) {
+      scheduledRaw.push(match);
+    }
+  }
+
+  // Sort after classification
+  scheduledRaw.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  // finishedRaw also needs to be sliced to 6 elements, like the original code did.
+  finishedRaw.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+  const finishedRawSliced = finishedRaw.slice(0, 6);
 
   // LOGIC: One active slot
   let activeRaw = null;
@@ -43,7 +59,7 @@ export async function handleMatches(isoCode, env, ctx) {
   else if (scheduledRaw.length > 0) activeRaw = scheduledRaw[0];
 
   // 4. Collect Names ONLY from relevant matches
-  const relevantMatches = [...finishedRaw];
+  const relevantMatches = [...finishedRawSliced];
   if (activeRaw) relevantMatches.push(activeRaw);
 
   const relevantNames = new Set();
@@ -112,7 +128,7 @@ export async function handleMatches(isoCode, env, ctx) {
     else finalUpcoming.push(mapMatch(activeRaw));
   }
 
-  const finished = finishedRaw.map(mapMatch);
+  const finished = finishedRawSliced.map(mapMatch);
 
   // Wybieramy mecz do wzbogacenia o TV/LiveDetails
   const targetMatch = finalLive[0] || finalUpcoming[0] || null;

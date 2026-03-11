@@ -20,11 +20,13 @@ export async function handleMatches(isoCode, env, ctx) {
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
   // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
   const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  const seenIds = new Set();
+  for (const match of allMatchesRaw) {
+    if (!seenIds.has(match.id)) {
+      seenIds.add(match.id);
+      uniqueMatchesList.push(match);
+    }
   }
 
   // 2. Classify Statuses (Raw) to find which ones we actually used

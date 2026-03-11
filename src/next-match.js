@@ -3,7 +3,11 @@ import { getBulkTeamTranslations } from './translator.js';
 import { fetchCached } from './cache-helper.js';
 
 export async function handleNextMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const nowMs = Date.now();
+  // ⚡ BOLT OPTIMIZATION: Stabilize cache keys by rounding timestamp to 300s TTL boundary
+  const roundedNowMs = Math.floor(nowMs / 300000) * 300000;
+  const now = new Date(roundedNowMs).toISOString().replace('T', ' ').substring(0, 19);
+
   const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${now}&limit=15&order[startTime]=asc&iso=${iso}`;
 
   try {

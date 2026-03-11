@@ -1,0 +1,3 @@
+## 2024-05-24 - [Cache Key Variation Edge Case]
+**Learning:** Including a per-second precise timestamp in API fetch query strings completely destroys caching efficacy because it changes the `Request` URL used as the cache key every second. This effectively overrides the intended TTL of the Cloudflare Cache.
+**Action:** When incorporating temporal bounds into cached requests (e.g. `startTime[before]=...`), always round the timestamp string down to the exact block of time matching the TTL boundary (e.g. `Math.floor(Date.now() / TTL_MS) * TTL_MS`) to ensure the generated URL remains constant for the duration of the cache life.

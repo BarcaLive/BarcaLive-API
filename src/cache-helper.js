@@ -73,3 +73,17 @@ export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = nu
 
     return response;
 }
+
+/**
+ * Returns an ISO date string rounded down to the nearest multiple of `ttlSeconds`.
+ * Used to ensure cache stability by aligning timestamps across requests.
+ * @param {number} ttlSeconds - The rounding window in seconds (e.g., 60).
+ * @param {Date} [now] - Optional Date object for testing.
+ * @returns {string} - Rounded ISO string (YYYY-MM-DD HH:mm:ss).
+ */
+export function getCacheableNow(ttlSeconds = 60, now = new Date()) {
+    const ms = now.getTime();
+    // Round down to the nearest multiple of ttlSeconds * 1000
+    const roundedMs = Math.floor(ms / (ttlSeconds * 1000)) * (ttlSeconds * 1000);
+    return new Date(roundedMs).toISOString().replace('T', ' ').substring(0, 19);
+}

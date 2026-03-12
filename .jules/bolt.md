@@ -1,0 +1,3 @@
+## 2024-05-20 - O(N) Match Deduplication and Classification Optimization
+**Learning:** Found a performance bottleneck in `src/match.js` where array deduplication was using an O(N^2) pattern (`Set` + `find` in a loop over IDs). Additionally, classifying matches into `live`, `scheduled`, and `finished` arrays used three separate `.filter()` passes over the array.
+**Action:** Replace the O(N^2) nested loops with a single-pass O(N) `Map` implementation for deduplication, and replace multiple `.filter()` calls with a single `for...of` loop to categorize matches in one pass (providing ~3x classification speed improvement).

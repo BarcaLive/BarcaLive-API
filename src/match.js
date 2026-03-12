@@ -19,23 +19,36 @@ export async function handleMatches(isoCode, env, ctx) {
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
+  // 1. Deduplicate in O(N) using Map to avoid nested O(N^2) loops
+  const matchMap = new Map();
+  for (const m of allMatchesRaw) {
+    if (!matchMap.has(m.id)) {
+      matchMap.set(m.id, m);
+    }
   }
+  const uniqueMatchesList = Array.from(matchMap.values());
 
   // 2. Classify Statuses (Raw) to find which ones we actually used
   const isLive = (m) => ['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live';
   const isFinished = (m) => m.statusGroup === 'finished' || m.status === 'finished';
-  const isScheduled = (m) => !isLive(m) && !isFinished(m);
 
-  // 3. Select relevant matches
-  const liveRaw = uniqueMatchesList.filter(isLive);
-  const scheduledRaw = uniqueMatchesList.filter(isScheduled).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-  const finishedRaw = uniqueMatchesList.filter(isFinished).sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).slice(0, 6);
+  // 3. Select relevant matches in a single O(N) pass to avoid three separate .filter() passes
+  const liveRaw = [];
+  const scheduledRaw = [];
+  const finishedRaw = [];
+
+  for (const m of uniqueMatchesList) {
+    if (isLive(m)) {
+      liveRaw.push(m);
+    } else if (isFinished(m)) {
+      finishedRaw.push(m);
+    } else {
+      scheduledRaw.push(m);
+    }
+  }
+
+  scheduledRaw.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  finishedRaw.sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).splice(6);
 
   // LOGIC: One active slot
   let activeRaw = null;

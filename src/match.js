@@ -3,15 +3,17 @@ import { getBulkTeamTranslations } from './translator.js';
 import { fetchCached } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
-  const now = new Date();
-  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
+  const now = Date.now();
+  // ⚡ Bolt: Round down timestamps to match cache TTLs for stable cache keys
+  const nowStringNext = new Date(now - (now % 120000)).toISOString().replace('T', ' ').substring(0, 19); // 120s TTL
+  const nowStringPrev = new Date(now - (now % 300000)).toISOString().replace('T', ' ').substring(0, 19); // 300s TTL
 
   // 1. Pobieramy dane z API
   // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)
   // Past (limit=15) -> Medium Cache (5m)
   const [nextRes, prevRes] = await Promise.all([
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=5&order[startTime]=asc`, { method: "GET" }, 120, ctx),
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowStringNext}&limit=5&order[startTime]=asc`, { method: "GET" }, 120, ctx),
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowStringPrev}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
   ]);
 
   const nextJson = await nextRes.json();

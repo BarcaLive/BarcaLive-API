@@ -3,8 +3,10 @@ import { getBulkTeamTranslations } from './translator.js';
 import { fetchCached } from './cache-helper.js';
 
 export async function handleNextMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${now}&limit=15&order[startTime]=asc&iso=${iso}`;
+  const nowMs = Date.now();
+  // ⚡ Bolt: Round down timestamp to match cache TTL for stable cache key
+  const nowString = new Date(nowMs - (nowMs % 300000)).toISOString().replace('T', ' ').substring(0, 19); // 300s TTL
+  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=15&order[startTime]=asc&iso=${iso}`;
 
   try {
     const res = await fetchCached(url, { method: "GET" }, 300, ctx); // 5 min cache

@@ -1,10 +1,10 @@
 import { CONFIG } from './config.js';
 import { getBulkTeamTranslations } from './translator.js';
-import { fetchCached } from './cache-helper.js';
+import { fetchCached, getRoundedTimeString } from './cache-helper.js';
 
 export async function handleNextMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${now}&limit=15&order[startTime]=asc&iso=${iso}`;
+  const nowStr = getRoundedTimeString(new Date(), 300);
+  const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowStr}&limit=15&order[startTime]=asc&iso=${iso}`;
 
   try {
     const res = await fetchCached(url, { method: "GET" }, 300, ctx); // 5 min cache

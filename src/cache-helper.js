@@ -7,6 +7,19 @@
  * @param {number} ttlSeconds Cache TTL in seconds
  * @returns {Promise<Response>}
  */
+/**
+ * Rounds a Date down to the nearest multiple of ttlSeconds
+ * to ensure cache keys with timestamps are stable.
+ * @param {Date} date The date to round
+ * @param {number} ttlSeconds The TTL window in seconds
+ * @returns {string} The rounded date in "YYYY-MM-DD HH:mm:ss" format
+ */
+export function getRoundedTimeString(date, ttlSeconds = 60) {
+    const ms = date.getTime();
+    const roundedMs = Math.floor(ms / (ttlSeconds * 1000)) * (ttlSeconds * 1000);
+    return new Date(roundedMs).toISOString().replace('T', ' ').substring(0, 19);
+}
+
 export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = null) {
     // Only cache GET requests
     const method = options?.method || 'GET';

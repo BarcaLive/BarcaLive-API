@@ -7,6 +7,16 @@
  * @param {number} ttlSeconds Cache TTL in seconds
  * @returns {Promise<Response>}
  */
+
+export function getRoundedTimeString(ttlSeconds) {
+    const now = new Date();
+    // Round down the timestamp to the nearest multiple of ttlSeconds
+    const ms = now.getTime();
+    const roundedMs = ms - (ms % (ttlSeconds * 1000));
+    const roundedDate = new Date(roundedMs);
+    return roundedDate.toISOString().replace('T', ' ').substring(0, 19);
+}
+
 export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = null) {
     // Only cache GET requests
     const method = options?.method || 'GET';

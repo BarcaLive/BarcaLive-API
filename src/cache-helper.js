@@ -1,4 +1,20 @@
 /**
+ * Helper to generate a cache-stable time string.
+ * Rounds down the given date to the nearest multiple of ttlSeconds.
+ *
+ * @param {Date} date - The date to round.
+ * @param {number} ttlSeconds - The TTL in seconds to round to.
+ * @returns {string} The rounded date as an ISO string (YYYY-MM-DD HH:mm:ss)
+ */
+export function getRoundedTimeString(date, ttlSeconds) {
+    const timestamp = date.getTime();
+    const ttlMs = ttlSeconds * 1000;
+    const roundedTimestamp = Math.floor(timestamp / ttlMs) * ttlMs;
+    const roundedDate = new Date(roundedTimestamp);
+    return roundedDate.toISOString().replace('T', ' ').substring(0, 19);
+}
+
+/**
  * Helper to fetch with Cloudflare Cache API.
  * Uses `caches.default`.
  * 

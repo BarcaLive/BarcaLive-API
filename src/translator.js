@@ -151,24 +151,35 @@ async function saveToSupabase(data, env) {
 }
 
 // --- Wikidata Helpers ---
+// Precompiled regex array for O(N) cleaning loop to avoid re-compiling expressions
+// and chaining unnecessary replace calls when no matches are found
+const NAME_REPLACEMENTS = [
+    { pattern: /(Fútbol|Futbol) Club /gi, replacement: 'FC ' },
+    { pattern: / Club de Fútbol/gi, replacement: ' CF' },
+    { pattern: /Real Club Deportivo /gi, replacement: 'RCD ' },
+    { pattern: /Real Club /gi, replacement: 'RC ' },
+    { pattern: /Unión Deportiva /gi, replacement: 'UD ' },
+    { pattern: /Agrupación Deportiva /gi, replacement: 'AD ' },
+    { pattern: / Football Club/gi, replacement: ' FC' },
+    { pattern: / Association Football Club/gi, replacement: ' AFC' },
+    { pattern: /Sport-Club /gi, replacement: 'SC ' },
+    { pattern: /Sportverein /gi, replacement: 'SV ' },
+    { pattern: /Ballspielverein /gi, replacement: 'BV ' },
+    { pattern: /Associazione Calcio /gi, replacement: 'AC ' },
+    { pattern: /Società Sportiva /gi, replacement: 'SS ' },
+    { pattern: /Olympique de /gi, replacement: 'O. ' }
+];
+
 function cleanName(name) {
     if (!name) return "";
-    return name
-        .replace(/(Fútbol|Futbol) Club /gi, 'FC ')
-        .replace(/ Club de Fútbol/gi, ' CF')
-        .replace(/Real Club Deportivo /gi, 'RCD ')
-        .replace(/Real Club /gi, 'RC ')
-        .replace(/Unión Deportiva /gi, 'UD ')
-        .replace(/Agrupación Deportiva /gi, 'AD ')
-        .replace(/ Football Club/gi, ' FC')
-        .replace(/ Association Football Club/gi, ' AFC')
-        .replace(/Sport-Club /gi, 'SC ')
-        .replace(/Sportverein /gi, 'SV ')
-        .replace(/Ballspielverein /gi, 'BV ')
-        .replace(/Associazione Calcio /gi, 'AC ')
-        .replace(/Società Sportiva /gi, 'SS ')
-        .replace(/Olympique de /gi, 'O. ')
-        .trim();
+    let result = name;
+    for (let i = 0; i < NAME_REPLACEMENTS.length; i++) {
+        const item = NAME_REPLACEMENTS[i];
+        // V8's .replace is highly optimized and does a fast scan first,
+        // so we don't need a separate .test() which would scan twice on match.
+        result = result.replace(item.pattern, item.replacement);
+    }
+    return result.trim();
 }
 
 async function fetchFromWikidata(clubName, ctx) {

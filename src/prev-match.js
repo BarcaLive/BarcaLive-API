@@ -1,9 +1,9 @@
 import { CONFIG } from './config.js';
 import { getBulkTeamTranslations } from './translator.js';
-import { fetchCached } from './cache-helper.js';
+import { fetchCached, getRoundedTimeString } from './cache-helper.js';
 
 export async function handlePrevMatches(iso = 'PL', env, ctx) {
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const now = getRoundedTimeString(300); // OPTIMIZATION: Use rounded timestamp for stable cache key (300s TTL)
   const url = `${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${now}&limit=15&order[startTime]=desc&iso=${iso}`;
 
   try {

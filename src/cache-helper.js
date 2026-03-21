@@ -7,6 +7,21 @@
  * @param {number} ttlSeconds Cache TTL in seconds
  * @returns {Promise<Response>}
  */
+/**
+ * Rounds the current time down to the nearest multiple of ttlSeconds.
+ * Returns a string formatted as "YYYY-MM-DD HH:mm:ss" matching the MECZYKI_API format.
+ * This ensures the URL (and thus the cache key) remains identical within the TTL window.
+ *
+ * @param {number} ttlSeconds The cache duration in seconds
+ * @returns {string} Rounded timestamp string
+ */
+export function getRoundedTimeString(ttlSeconds) {
+    const nowMs = Date.now();
+    const ttlMs = ttlSeconds * 1000;
+    const roundedMs = Math.floor(nowMs / ttlMs) * ttlMs;
+    return new Date(roundedMs).toISOString().replace('T', ' ').substring(0, 19);
+}
+
 export async function fetchCached(requestUrl, options, ttlSeconds = 60, ctx = null) {
     // Only cache GET requests
     const method = options?.method || 'GET';

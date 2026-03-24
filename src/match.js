@@ -1,17 +1,16 @@
 import { CONFIG } from './config.js';
 import { getBulkTeamTranslations } from './translator.js';
-import { fetchCached } from './cache-helper.js';
+import { fetchCached, getRoundedTimeString } from './cache-helper.js';
 
 export async function handleMatches(isoCode, env, ctx) {
-  const now = new Date();
-  const nowString = now.toISOString().replace('T', ' ').substring(0, 19);
-
   // 1. Pobieramy dane z API
-  // Use Cache: Live/Upcoming (limit=5) -> Short Cache (30s)
-  // Past (limit=15) -> Medium Cache (5m)
+  // Use Cache: Live/Upcoming (limit=5) -> Short Cache (120s)
+  // Past (limit=15) -> Medium Cache (300s)
+  // Using rounded time string ensures that identical requests made within the TTL
+  // generate the EXACT same URL, enabling Cloudflare fetch caching to actually work.
   const [nextRes, prevRes] = await Promise.all([
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${nowString}&limit=5&order[startTime]=asc`, { method: "GET" }, 120, ctx),
-    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${nowString}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[after]=${getRoundedTimeString(120)}&limit=5&order[startTime]=asc`, { method: "GET" }, 120, ctx),
+    fetchCached(`${CONFIG.MECZYKI_API}/matches?itemId=${CONFIG.ITEM_ID}&startTime[before]=${getRoundedTimeString(300)}&limit=15&order[startTime]=desc`, { method: "GET" }, 300, ctx)
   ]);
 
   const nextJson = await nextRes.json();

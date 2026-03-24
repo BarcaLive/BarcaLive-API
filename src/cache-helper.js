@@ -1,4 +1,17 @@
 /**
+ * Generates a rounded time string to optimize caching by grouping requests within TTL windows.
+ *
+ * @param {number} ttlSeconds - The TTL window in seconds.
+ * @returns {string} - Rounded timestamp in 'YYYY-MM-DD HH:mm:ss' format.
+ */
+export function getRoundedTimeString(ttlSeconds) {
+    const now = new Date();
+    // Round to nearest TTL block to ensure cache keys are stable
+    const roundedMs = Math.floor(now.getTime() / (ttlSeconds * 1000)) * (ttlSeconds * 1000);
+    return new Date(roundedMs).toISOString().replace('T', ' ').substring(0, 19);
+}
+
+/**
  * Helper to fetch with Cloudflare Cache API.
  * Uses `caches.default`.
  * 

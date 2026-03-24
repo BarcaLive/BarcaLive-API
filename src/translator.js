@@ -5,6 +5,10 @@ import { fetchCached } from './cache-helper.js';
 const SUPABASE_TTL = 86400; // 24 hours
 const WIKI_TTL = 86400;     // 24 hours
 
+// OPTIMIZATION: In-memory cache for translations to avoid redundant network calls
+// This persists across requests within the same worker instance.
+const localTranslationCache = new Map();
+
 /**
  * Optimized Bulk Translation Fetcher.
  */
@@ -14,45 +18,63 @@ export async function getBulkTeamTranslations(names, env, ctx) {
     // 1. Deduplicate inputs
     const uniqueNames = [...new Set(names.filter(n => n))];
     const resultMap = {};
+    const missingInLocal = [];
 
-    // 2. Batch Fetch from Supabase
+    // Check local cache first
+    for (const name of uniqueNames) {
+        if (localTranslationCache.has(name)) {
+            resultMap[name] = localTranslationCache.get(name);
+        } else {
+            missingInLocal.push(name);
+        }
+    }
+
+    // If all found in local cache, return immediately
+    if (missingInLocal.length === 0) {
+        return resultMap;
+    }
+
+    // 2. Batch Fetch from Supabase (Only for missing)
     const chunkSize = 50; // Use larger chunks to reduce subrequests (Supabase handles larger URLs fine)
     const chunks = [];
-    for (let i = 0; i < uniqueNames.length; i += chunkSize) {
-        chunks.push(uniqueNames.slice(i, i + chunkSize));
+    for (let i = 0; i < missingInLocal.length; i += chunkSize) {
+        chunks.push(missingInLocal.slice(i, i + chunkSize));
     }
 
     const supabaseResults = await Promise.all(
         chunks.map(chunk => fetchFromSupabaseBulk(chunk, env, ctx))
     );
 
-    // Flatten results and populate map
+    // Flatten results and populate map & local cache
     for (const batch of supabaseResults) {
         if (batch) {
             for (const item of batch) {
                 // Trust Supabase data if found. Even if all are same, it might be valid.
-                resultMap[item.pl] = {
+                const transl = {
                     pl: item.pl, en: item.en, es: item.es, de: item.de, fr: item.fr
                 };
+                resultMap[item.pl] = transl;
+                localTranslationCache.set(item.pl, transl);
             }
         }
     }
 
     // 3. Identify Missing or Suspicious
-    const missingNames = uniqueNames.filter(name => !resultMap[name]);
+    // We only care about names that were missing locally AND returned no result from Supabase
+    const stillMissingNames = missingInLocal.filter(name => !resultMap[name]);
 
     // LIMIT SUBREQUESTS!
     // Cloudflare has a limit of 50 subrequests.
     // Reduced to 1 to strongly ensure we save budget for Fotmob/Meczyki fetches.
     const MAX_WIKI_FETCHES = 1;
-    const namesToFetch = missingNames.slice(0, MAX_WIKI_FETCHES);
-    const namesToSkip = missingNames.slice(MAX_WIKI_FETCHES);
+    const namesToFetch = stillMissingNames.slice(0, MAX_WIKI_FETCHES);
+    const namesToSkip = stillMissingNames.slice(MAX_WIKI_FETCHES);
 
-    // Fill skipped with fallback immediately
+    // Fill skipped with fallback immediately & cache locally
     namesToSkip.forEach(name => {
-        resultMap[name] = {
-            pl: name, en: name, es: name, de: name, fr: name
-        };
+        const fallback = { pl: name, en: name, es: name, de: name, fr: name };
+        resultMap[name] = fallback;
+        localTranslationCache.set(name, fallback);
     });
 
     // 4. Fetch Missing from Wikidata (Parallel - Limited)
@@ -64,6 +86,8 @@ export async function getBulkTeamTranslations(names, env, ctx) {
             transl.pl = name;
 
             resultMap[name] = transl;
+            localTranslationCache.set(name, transl);
+
             // Save to Supabase (Fire and forget - NO CACHE for POST)
             if (env.API_KEY) {
                 const saveTask = saveToSupabase(transl, env);
@@ -71,9 +95,9 @@ export async function getBulkTeamTranslations(names, env, ctx) {
                 else await saveTask;
             }
         } else {
-            resultMap[name] = {
-                pl: name, en: name, es: name, de: name, fr: name
-            };
+            const fallback = { pl: name, en: name, es: name, de: name, fr: name };
+            resultMap[name] = fallback;
+            localTranslationCache.set(name, fallback);
         }
     });
 

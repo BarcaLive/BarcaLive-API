@@ -18,23 +18,33 @@ export async function handleMatches(isoCode, env, ctx) {
   const allMatchesRaw = [...(nextJson.data || []), ...(prevJson.data || [])];
 
   // OPTIMIZATION: Filter matches BEFORE translation to reduce subrequests
-  // 1. Unique IDs
-  const uniqueIds = Array.from(new Set(allMatchesRaw.map(m => m.id)));
-  const uniqueMatchesList = [];
-  for (const id of uniqueIds) {
-    const match = allMatchesRaw.find(m => m.id === id);
-    if (match) uniqueMatchesList.push(match);
-  }
-
-  // 2. Classify Statuses (Raw) to find which ones we actually used
+  // Combine unique filtering and categorization into a single O(N) loop
   const isLive = (m) => ['live', 'half_time', 'extra_time', 'penalties'].includes(m.status) || m.statusGroup === 'live';
   const isFinished = (m) => m.statusGroup === 'finished' || m.status === 'finished';
-  const isScheduled = (m) => !isLive(m) && !isFinished(m);
 
-  // 3. Select relevant matches
-  const liveRaw = uniqueMatchesList.filter(isLive);
-  const scheduledRaw = uniqueMatchesList.filter(isScheduled).sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-  const finishedRaw = uniqueMatchesList.filter(isFinished).sort((a, b) => new Date(b.startTime) - new Date(a.startTime)).slice(0, 6);
+  const seenIds = new Set();
+  const uniqueMatchesList = [];
+  const liveRaw = [];
+  const scheduledRaw = [];
+  const finishedRawUnsorted = [];
+
+  for (const m of allMatchesRaw) {
+    if (seenIds.has(m.id)) continue;
+    seenIds.add(m.id);
+    uniqueMatchesList.push(m);
+
+    const live = isLive(m);
+    const finished = isFinished(m);
+
+    if (live) liveRaw.push(m);
+    if (finished) finishedRawUnsorted.push(m);
+    if (!live && !finished) scheduledRaw.push(m);
+  }
+
+  scheduledRaw.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  const finishedRaw = finishedRawUnsorted
+    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
+    .slice(0, 6);
 
   // LOGIC: One active slot
   let activeRaw = null;

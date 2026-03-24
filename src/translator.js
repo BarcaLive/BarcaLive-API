@@ -141,11 +141,6 @@ async function fetchFromSupabaseBulk(names, env, ctx) {
     }
 }
 
-async function fetchFromSupabase(name, env) {
-    const res = await fetchFromSupabaseBulk([name], env);
-    return res ? res[0] : null;
-}
-
 async function saveToSupabase(data, env) {
     if (!env.API_KEY) return;
 
